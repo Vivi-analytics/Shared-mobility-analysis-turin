@@ -1,0 +1,142 @@
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Point, LineString
+import matplotlib.pyplot as plt
+import numpy as np
+
+TRIPS_PATH = "/Users/shiwei/Desktop/all_operators_clean.csv"
+ZONES_PATH = "/Users/shiwei/Desktop/课件/第三学期/energy/Turin_Districts/Turin_Districts.shp"
+
+ZONE_ID = "id_distret"
+
+df = pd.read_csv(TRIPS_PATH, low_memory=False)
+zones = gpd.read_file(ZONES_PATH)
+
+zones = zones.to_crs(epsg=4326)
+zones[ZONE_ID] = zones[ZONE_ID].astype(int)
+
+gdf_start = gpd.GeoDataFrame(
+    df, geometry=gpd.points_from_xy(df["start_lon"], df["start_lat"]), crs="EPSG:4326"
+)
+gdf_end = gpd.GeoDataFrame(
+    df, geometry=gpd.points_from_xy(df["end_lon"], df["end_lat"]), crs="EPSG:4326"
+)
+
+gdf_start = gpd.sjoin(gdf_start, zones[[ZONE_ID, "geometry"]], how="left", predicate="within")
+gdf_end   = gpd.sjoin(gdf_end,   zones[[ZONE_ID, "geometry"]], how="left", predicate="within")
+
+df["origin"] = gdf_start[ZONE_ID].values
+df["destination"] = gdf_end[ZONE_ID].values
+
+df = df.dropna(subset=["origin", "destination"])
+df["origin"] = df["origin"].astype(int)
+df["destination"] = df["destination"].astype(int)
+
+df["start_time_parsed"] = pd.to_datetime(df["start_time"], format="mixed", errors="coerce")
+df = df.dropna(subset=["start_time_parsed"])
+df["hour"] = df["start_time_parsed"].dt.hour
+
+peak_mask = df["hour"].between(7, 9) | df["hour"].between(17, 19)
+df_peak = df[peak_mask]
+df_off  = df[~peak_mask]
+
+def build_od(data):
+    return data.groupby(["origin", "destination"]).size().reset_index(name="trips")
+
+od_peak = build_od(df_peak)
+od_off  = build_od(df_off)
+
+zones["centroid"] = zones.geometry.centroid
+centroids = zones[[ZONE_ID, "centroid"]]
+
+def build_lines(od):
+    lines, trips_list = [], []
+
+    for _, row in od.iterrows():
+        o, d = int(row["origin"]), int(row["destination"])
+        p1 = centroids.loc[centroids[ZONE_ID] == o, "centroid"]
+        p2 = centroids.loc[centroids[ZONE_ID] == d, "centroid"]
+
+        if len(p1) == 0 or len(p2) == 0:
+            continue
+
+        lines.append(LineString([p1.values[0], p2.values[0]]))
+        trips_list.append(row["trips"])
+
+    return gpd.GeoDataFrame({"trips": trips_list}, geometry=lines, crs="EPSG:4326")
+
+flow_peak = build_lines(od_peak)
+flow_off  = build_lines(od_off)
+
+def top_flows(flow, percent=0.80):
+    if flow.empty:
+        return flow
+    thr = flow["trips"].quantile(percent)
+    return flow[flow["trips"] >= thr]
+
+flow_peak_top = top_flows(flow_peak, 0.80)
+flow_off_top  = top_flows(flow_off,  0.80)
+
+def plot_map(flow, title):
+    if flow.empty:
+        print("⚠ No flow to plot:", title)
+        return
+
+    flow = flow.copy()
+
+    q1 = flow["trips"].quantile(0.33)
+    q2 = flow["trips"].quantile(0.66)
+
+    colors = []
+    widths = []
+
+    for v in flow["trips"]:
+        if v >= q2:      
+            colors.append("#00441b")   
+            widths.append(8)
+        elif v >= q1:    
+            colors.append("#41ab5d")
+            widths.append(4)
+        else:            
+            colors.append("#c7e9c0")
+            widths.append(1.5)
+
+    fig, ax = plt.subplots(figsize=(10, 12))
+
+    zones.plot(ax=ax, color="#f5fbf2", edgecolor="gray", linewidth=0.6)
+
+    flow.plot(
+        ax=ax,
+        linewidth=widths,
+        color=colors,
+        alpha=0.9
+    )
+
+    top5 = flow.sort_values("trips", ascending=False).head(5)
+    for _, row in top5.iterrows():
+        x, y = row.geometry.centroid.xy
+        ax.text(
+            x[0], y[0],
+            f"{int(row['trips'])}",
+            fontsize=14,
+            fontweight="bold",
+            ha="center",
+            color="black",
+            bbox=dict(facecolor="white", edgecolor="black", alpha=0.9)
+        )
+
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], color="#00441b", lw=6, label="Strong flow"),
+        Line2D([0], [0], color="#41ab5d", lw=4, label="Medium flow"),
+        Line2D([0], [0], color="#c7e9c0", lw=2, label="Weak flow"),
+    ]
+    ax.legend(handles=legend_elements, loc="upper right")
+
+    plt.title(title, fontsize=20)
+    plt.axis("off")
+    plt.tight_layout()
+    plt.show()
+
+plot_map(flow_peak_top, "Peak Hours O–D Flow (Top 20%)")
+plot_map(flow_off_top,  "Off-Peak Hours O–D Flow (Top 20%)")
