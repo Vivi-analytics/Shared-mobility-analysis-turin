@@ -1,0 +1,142 @@
+import pandas as pd
+import geopandas as gpd
+import matplotlib.pyplot as plt
+from shapely.geometry import LineString
+
+TRIP_PATH = "/Users/shiwei/Desktop/all_operators_clean.csv"
+ZONE_PATH = "/Users/shiwei/Desktop/课件/第三学期/energy/Turin_Districts/Turin_Districts.shp"
+
+df = pd.read_csv(TRIP_PATH)
+
+zones = gpd.read_file(ZONE_PATH)
+
+ZONE_ID = "id_distret"   
+zones[ZONE_ID] = zones[ZONE_ID].astype(int)
+
+zones = zones.to_crs(epsg=32632)
+
+df["start_point"] = gpd.points_from_xy(df["start_lon"], df["start_lat"], crs="EPSG:4326")
+df["end_point"]   = gpd.points_from_xy(df["end_lon"], df["end_lat"], crs="EPSG:4326")
+
+gdf_start = gpd.GeoDataFrame(df, geometry="start_point", crs="EPSG:4326").to_crs(epsg=32632)
+gdf_end   = gpd.GeoDataFrame(df, geometry="end_point",   crs="EPSG:4326").to_crs(epsg=32632)
+
+gdf_start = gpd.sjoin(gdf_start, zones[[ZONE_ID, "geometry"]], predicate="within", how="left")
+gdf_end   = gpd.sjoin(gdf_end,   zones[[ZONE_ID, "geometry"]], predicate="within", how="left")
+
+gdf_start.rename(columns={ZONE_ID: "origin"}, inplace=True)
+gdf_end.rename(columns={ZONE_ID: "destination"}, inplace=True)
+
+df["origin"] = gdf_start["origin"].values
+df["destination"] = gdf_end["destination"].values
+
+df = df.dropna(subset=["origin", "destination"])
+
+df["origin"] = df["origin"].astype(int)
+df["destination"] = df["destination"].astype(int)
+
+od = (
+    df.groupby(["origin", "destination"])
+      .size()
+      .reset_index(name="trips")
+)
+
+print("the number of OD pairs:", len(od))
+
+
+threshold = od["trips"].quantile(0.80)
+od_top = od[od["trips"] >= threshold].copy()
+
+print("Top 20% OD pairs:", len(od_top))
+
+zones["centroid"] = zones.geometry.centroid
+centroids = zones.set_index(ZONE_ID)["centroid"]
+
+lines = []
+origins = []
+destinations = []
+trips_list = []
+
+for _, row in od_top.iterrows():
+    o = row["origin"]
+    d = row["destination"]
+    t = row["trips"]
+
+    if o in centroids.index and d in centroids.index:
+        p1 = centroids.loc[o]
+        p2 = centroids.loc[d]
+
+        if p1.is_empty or p2.is_empty:
+            continue
+        if p1.equals(p2):
+            continue
+
+        lines.append(LineString([p1, p2]))
+        origins.append(o)
+        destinations.append(d)
+        trips_list.append(t)
+
+flow_gdf = gpd.GeoDataFrame(
+    {
+        "origin": origins,
+        "destination": destinations,
+        "trips": trips_list
+    },
+    geometry=lines,
+    crs="EPSG:32632"
+)
+
+print("streamlines can be drawn:", len(flow_gdf))
+
+zones_wgs = zones.to_crs(epsg=4326)
+flow_wgs  = flow_gdf.to_crs(epsg=4326)
+
+max_trips = flow_wgs["trips"].max()
+flow_wgs["width"] = 0.6 + 6 * (flow_wgs["trips"] / max_trips)
+
+fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+
+zones_wgs.plot(
+    ax=ax,
+    color="#F2FBF4",
+    edgecolor="gray",
+    linewidth=0.6
+)
+
+flow_wgs.plot(
+    ax=ax,
+    column="trips",
+    cmap="Greens",
+    linewidth=flow_wgs["width"],
+    alpha=0.9,
+    legend=True,
+    legend_kwds={"label": "Number of trips"}
+)
+
+top10 = flow_wgs.sort_values("trips", ascending=False).head(10)
+
+for _, r in top10.iterrows():
+    mid = r.geometry.centroid
+
+    ax.text(
+        mid.x,
+        mid.y,
+        f"{int(r['trips'])}",
+        fontsize=11,                 
+        fontweight="bold",           
+        color="#0B3D0B",              
+        ha="center",
+        va="center",
+        bbox=dict(                  
+            boxstyle="round,pad=0.25",
+            facecolor="white",
+            edgecolor="none",
+            alpha=0.85
+        ),
+        zorder=10                    
+    )
+
+ax.set_title("Torino O–D Flow Map (Top 20% Trips)", fontsize=16)
+ax.axis("off")
+plt.tight_layout()
+plt.show()
