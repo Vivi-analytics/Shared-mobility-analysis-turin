@@ -1,0 +1,119 @@
+import pandas as pd
+import geopandas as gpd
+import numpy as np
+import matplotlib.pyplot as plt
+from shapely.geometry import Point
+
+
+TRIP_CSV_PATH = "/Users/shiwei/Desktop/all_operators_clean.csv"
+ZONING_SHP_PATH = "/Users/shiwei/Desktop/课件/第三学期/energy/Turin_Districts/Turin_Districts.shp"
+
+df = pd.read_csv(TRIP_CSV_PATH)
+print("Total Trips :", len(df))
+
+zones = gpd.read_file(ZONING_SHP_PATH)
+zones = zones.to_crs(epsg=4326)
+
+print("Zoning field name:", list(zones.columns))
+
+zones.columns = zones.columns.str.lower()
+
+zone_col = None
+for c in ["id_distr", "id_distret", "id_distretto"]:
+    if c in zones.columns:
+        zone_col = c
+        break
+
+if zone_col is None:
+    raise ValueError
+
+zones["zone_id"] = zones[zone_col].astype(int)
+print("Use zoning ID column:", zone_col)
+
+df["start_lon"] = df["start_lon"].astype(float)
+df["start_lat"] = df["start_lat"].astype(float)
+df["end_lon"] = df["end_lon"].astype(float)
+df["end_lat"] = df["end_lat"].astype(float)
+
+gdf_start = gpd.GeoDataFrame(
+    df,
+    geometry=gpd.points_from_xy(df["start_lon"], df["start_lat"]),
+    crs="EPSG:4326"
+)
+
+gdf_end = gpd.GeoDataFrame(
+    df,
+    geometry=gpd.points_from_xy(df["end_lon"], df["end_lat"]),
+    crs="EPSG:4326"
+)
+
+start_join = gpd.sjoin(
+    gdf_start,
+    zones[["zone_id", "geometry"]],
+    how="left",
+    predicate="within"
+)
+
+end_join = gpd.sjoin(
+    gdf_end,
+    zones[["zone_id", "geometry"]],
+    how="left",
+    predicate="within"
+)
+
+df["origin"] = start_join["zone_id"].values
+df["destination"] = end_join["zone_id"].values
+
+df = df.dropna(subset=["origin", "destination"])
+df["origin"] = df["origin"].astype(int)
+df["destination"] = df["destination"].astype(int)
+
+print("trips in matching:", len(df))
+
+zone_ids = sorted(zones["zone_id"].unique())
+print(" zoning ID:", zone_ids)
+
+zone_index = {z: i for i, z in enumerate(zone_ids)}
+N = len(zone_ids)
+
+OD = np.zeros((N, N), dtype=int)
+
+for _, row in df.iterrows():
+    O = zone_index[row["origin"]]
+    D = zone_index[row["destination"]]
+    OD[O, D] += 1
+
+outflow = OD.sum(axis=1)
+inflow = OD.sum(axis=0)
+
+print("Top 10 outflow:", outflow[:10])
+print("Top 10 inflow:", inflow[:10])
+print("biggest outflow:", outflow.max())
+print("biggest inflow:", inflow.max())
+
+plt.figure(figsize=(6, 14))
+plt.title("Outflow by Zone (Absolute Trips)")
+plt.imshow(outflow.reshape(-1, 1), cmap="Greens", aspect="auto")
+plt.yticks(range(N), zone_ids)
+plt.colorbar(label="Number of trips")
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(6, 14))
+plt.title("Inflow by Zone (Absolute Trips)")
+plt.imshow(inflow.reshape(-1, 1), cmap="Greens", aspect="auto")
+plt.yticks(range(N), zone_ids)
+plt.colorbar(label="Number of trips")
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 8))
+plt.title("O–D Matrix – Torino Scooter Trips")
+plt.imshow(OD, cmap="Greens")
+plt.xticks(range(N), zone_ids, rotation=90)
+plt.yticks(range(N), zone_ids)
+plt.xlabel("Destination")
+plt.ylabel("Origin")
+plt.colorbar(label="Trips")
+plt.tight_layout()
+plt.show()
