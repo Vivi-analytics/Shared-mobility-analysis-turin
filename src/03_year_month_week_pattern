@@ -1,0 +1,120 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+
+df = pd.read_csv("/Users/shiwei/Desktop/all_operators_clean.csv", dtype=str)
+
+df_A = df[df["operator"] == "A"].copy()
+df_B = df[df["operator"] == "B"].copy()
+df_Bird = df[df["operator"] == "Bird"].copy()
+
+df_A["start_time_parsed"] = pd.to_datetime(df_A["start_time"], errors="coerce")
+df_B["start_time_parsed"] = pd.to_datetime(df_B["start_time"], errors="coerce")
+
+df_Bird["start_time_parsed"] = pd.to_datetime(
+    df_Bird["start_time"],
+    format="%Y-%m-%d, %H:%M",
+    errors="coerce"
+)
+
+df = pd.concat([df_A, df_B, df_Bird], ignore_index=True)
+df = df.dropna(subset=["start_time_parsed"])
+
+print(" distribution of operator data:")
+print(df["operator"].value_counts())
+
+print("total length:", len(df))
+
+# Only use common time period!!! overlapping window
+start_common = pd.to_datetime("2024-01-31 00:00:00")
+end_common   = pd.to_datetime("2025-04-29 23:59:59")
+
+df = df[
+    (df["start_time_parsed"] >= start_common) &
+    (df["start_time_parsed"] <= end_common)
+]
+
+print("\n total length of common time period:", len(df))
+
+df["year"] = df["start_time_parsed"].dt.year
+df["month"] = df["start_time_parsed"].dt.to_period("M")
+df["week"] = df["start_time_parsed"].dt.to_period("W")
+df["date"] = df["start_time_parsed"].dt.date
+
+
+yearly_trips = df.groupby("year").size()
+
+MACARON_GREEN = "#7ED6B2"
+
+plt.figure()
+bars = plt.bar(yearly_trips.index.astype(str), yearly_trips.values,color=MACARON_GREEN)
+plt.title("Yearly Mobility Trend (Common Time Window)")
+plt.xlabel("Year")
+plt.ylabel("Number of Trips")
+
+for bar in bars:
+    yval = int(bar.get_height())
+    plt.text(bar.get_x() + bar.get_width()/2, yval,
+             f"{yval:,}", ha='center', va='bottom', fontsize=10)
+
+plt.tight_layout()
+plt.show()
+
+active_days = df.groupby("year")["date"].nunique()
+avg_trips_per_day = yearly_trips / active_days
+
+print("\nActive days of year：")
+print(active_days)
+
+print("\n Average number of trips per day :")
+print(avg_trips_per_day)
+
+monthly_trips = df.groupby("month").size()
+
+plt.figure()
+plt.plot(monthly_trips.index.astype(str), monthly_trips.values,color=MACARON_GREEN,linewidth=2)
+plt.title("Monthly Mobility Trend (Common Time Window)")
+plt.xlabel("Month")
+plt.ylabel("Number of Trips")
+plt.xticks(rotation=45)
+
+max_month = monthly_trips.idxmax()
+min_month = monthly_trips.idxmin()
+
+plt.text(str(max_month), monthly_trips[max_month],
+         f"{int(monthly_trips[max_month]):,}",
+         ha='center', va='bottom', fontsize=9)
+
+plt.text(str(min_month), monthly_trips[min_month],
+         f"{int(monthly_trips[min_month]):,}",
+         ha='center', va='top', fontsize=9)
+
+plt.tight_layout()
+plt.show()
+
+
+weekly_trips = df.groupby("week").size()
+
+weekly_labels = weekly_trips.index.astype(str)
+x = range(len(weekly_trips))
+
+plt.figure()
+plt.plot(x, weekly_trips.values,color=MACARON_GREEN,
+    linewidth=2)
+plt.title("Weekly Mobility Trend (Common Time Window)")
+plt.xlabel("Week")
+plt.ylabel("Number of Trips")
+
+step = 6
+plt.xticks(
+    ticks = list(range(0, len(x), step)),
+    labels = weekly_labels[::step],
+    rotation = 45
+)
+
+plt.tight_layout()
+plt.show()
+
+print("Original Total:", 2564791)
+print(" Total after analysis:", len(df))
+print("Actual retention ratio:", len(df) / 2564791)
+
