@@ -46,3 +46,8 @@ Course focus: Data analytics applied to urban systems and shared mobility
 
 ## Notes
 This project is an academic and personal portfolio project. It is intended to demonstrate analytical reasoning, problem decomposition, and the ability to translate data into actionable insights, rather than production-level system development.
+
+## Report
+
+The complete project report, including methodology, results, and discussion, is available in:
+- `report/shared_mobility_report.pdf`
