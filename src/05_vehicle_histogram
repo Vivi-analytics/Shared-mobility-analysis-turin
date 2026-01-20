@@ -1,0 +1,54 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+df = pd.read_csv(
+    "/Users/shiwei/Desktop/all_operators_clean.csv",
+    dtype=str
+)
+
+df["operator"] = df["operator"].str.strip()
+
+print("Operator data distribution:")
+print(df["operator"].value_counts())
+
+operators = df["operator"].unique()
+
+for op in operators:
+    df_op = df[df["operator"] == op]
+
+    print(f"\n{op}, {len(df_op)}")
+
+    if df_op.empty:
+        print(f"⚠ {op} ")
+        continue
+
+    trips_op = df_op.groupby("vehicle_id").size()
+
+    upper_limit = trips_op.quantile(0.95)
+    data_to_plot = trips_op[trips_op <= upper_limit]
+
+    mean_val = data_to_plot.mean()
+    median_val = data_to_plot.median()
+
+    plt.figure(figsize=(8, 5))
+
+    plt.hist(
+        data_to_plot,
+        bins=40,
+        color="#A8D5BA",     
+        edgecolor="black",
+        alpha=0.9
+    )
+
+    plt.axvline(mean_val, linestyle="--", linewidth=2, label=f"Mean = {mean_val:.1f}")
+    plt.axvline(median_val, linestyle=":", linewidth=2, label=f"Median = {median_val:.1f}")
+    plt.axvline(upper_limit, linestyle="-.", linewidth=2, label=f"95% = {upper_limit:.0f}")
+
+    plt.title(f"Histogram of Trips per Vehicle - Operator {op} (<=95th percentile)")
+    plt.xlabel("Number of Trips per Vehicle")
+    plt.ylabel("Number of Vehicles")
+
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
