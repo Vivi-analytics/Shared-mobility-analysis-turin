@@ -1,0 +1,53 @@
+import pandas as pd
+
+df_all = pd.read_csv("/Users/shiwei/Desktop/all_operators_clean.csv", dtype=str)
+
+print("Original distibution of operator data:")
+print(df_all["operator"].value_counts())
+
+s = df_all["start_time"].astype(str)
+
+parsed = pd.Series(pd.NaT, index=df_all.index)
+
+mask_digits14 = s.str.len().eq(14) & s.str.isnumeric()
+parsed[mask_digits14] = pd.to_datetime(
+    s[mask_digits14],
+    format="%Y%m%d%H%M%S",
+    errors="coerce"
+)
+
+mask_bird = s.str.contains(r",\s*\d{1,2}:\d{2}", regex=True)
+parsed[mask_bird] = pd.to_datetime(
+    s[mask_bird],
+    format="%Y-%m-%d, %H:%M",
+    errors="coerce"
+)
+
+mask_other = parsed.isna()
+parsed[mask_other] = pd.to_datetime(
+    s[mask_other],
+    errors="coerce",
+    infer_datetime_format=True
+)
+
+df_all["start_time_parsed"] = parsed
+
+print("failure number (according to different operator):")
+print(df_all["start_time_parsed"].isna().groupby(df_all["operator"]).sum())
+
+df_good = df_all.dropna(subset=["start_time_parsed"])
+
+print("\n distribution of operator after dropna:")
+print(df_good["operator"].value_counts())
+
+print("\n different time range of different operator")
+print(
+    df_good.groupby("operator")["start_time_parsed"]
+    .agg(["min", "max", "count"])
+)
+
+
+print("\n whole time range:")
+print(df_good["start_time_parsed"].min(), "→", df_good["start_time_parsed"].max())
+
+
