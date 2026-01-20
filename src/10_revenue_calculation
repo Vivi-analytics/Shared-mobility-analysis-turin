@@ -1,0 +1,30 @@
+import pandas as pd
+
+CSV_PATH = "/Users/shiwei/Desktop/all_operators_clean.csv"
+
+df = pd.read_csv(CSV_PATH)
+
+df = df[df["duration_min"] > 0]
+df = df[df["operator"].isin(["A", "B", "C"])]
+
+UNLOCK_FEE = 1.0
+
+PRICE_PER_MIN = {
+    "A": 0.28,  # Lime
+    "B": 0.24,  # Voi
+    "C": 0.26   # Bird
+}
+
+df["price_per_min"] = df["operator"].map(PRICE_PER_MIN)
+
+df["revenue_eur"] = UNLOCK_FEE + df["duration_min"] * df["price_per_min"]
+
+annual_revenue = (
+    df.groupby("operator")["revenue_eur"]
+    .sum()
+    .reset_index()
+    .rename(columns={"revenue_eur": "annual_revenue_eur"})
+)
+
+print("\n=== Annual Revenue per Operator (1 year estimation) ===")
+print(annual_revenue)
